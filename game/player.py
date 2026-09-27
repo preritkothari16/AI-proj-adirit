@@ -1,4 +1,4 @@
-"""Player input contracts (P1.2) and the Player entity (P2.2).
+"""Player input contracts (P1.2), the shared Body movement and the Player entity (P2.2).
 
 Action is the single interface between any controller (human keyboard/mouse,
 BotPlayer) and World.step(). Player (P2.2) is the controllable entity:
@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, Tuple, runtime_checkable
 
-from config import FIXED_DT, PLAYER_MAX_HP, PLAYER_RADIUS, PLAYER_SPEED
+from config import FIRE_COOLDOWN, FIXED_DT, PLAYER_MAX_HP, PLAYER_RADIUS, PLAYER_SPEED
 
 Tile = Tuple[int, int]
 _EPS = 1e-6
@@ -33,29 +33,20 @@ class Controller(Protocol):
     def get_action(self, world) -> Action: ...
 
 
-class Player:
-    """The player entity: position in world pixels, HP, and wall-aware movement.
+class Body:
+    """Something that moves through the tile map: position in world pixels plus
+    wall-aware movement. Shared by Player and Zombie (P2.6).
 
-    Knows nothing about keyboards or pygame — it only consumes a move vector.
     Collision uses an axis-aligned square of half-width `radius`, resolved one
     axis at a time, which gives sliding along walls for free.
     """
 
-    def __init__(
-        self,
-        pos: Tuple[float, float],
-        tile_size: int,
-        speed: float = PLAYER_SPEED,
-        max_hp: float = PLAYER_MAX_HP,
-        radius: float = PLAYER_RADIUS,
-    ):
+    def __init__(self, pos: Tuple[float, float], tile_size: int, speed: float, radius: float):
         if speed * FIXED_DT >= tile_size:
-            raise ValueError("speed too high: player could tunnel through a tile in one tick")
+            raise ValueError("speed too high: body could tunnel through a tile in one tick")
         self.x, self.y = float(pos[0]), float(pos[1])
         self.tile_size = tile_size
         self.speed = speed
-        self.max_hp = max_hp
-        self.hp = max_hp
         self.radius = radius
 
     @property
@@ -75,6 +66,10 @@ class Player:
         step = self.speed * dt
         self._move_x(dx * step, is_blocked)
         self._move_y(dy * step, is_blocked)
+
+    def occupied_tiles(self) -> list[Tile]:
+        """Tiles the collision box currently overlaps."""
+        return self._overlapped_tiles(self.x, self.y)
 
     def _overlapped_tiles(self, x: float, y: float) -> list[Tile]:
         ts, r = self.tile_size, self.radius
@@ -108,3 +103,32 @@ class Player:
             else:
                 new_y = (max(ty for _, ty in blocked) + 1) * ts + self.radius
         self.y = new_y
+
+
+class Player(Body):
+    """The player entity: HP, fire cooldown, and Body movement.
+
+    Knows nothing about keyboards or pygame — it only consumes a move vector.
+    """
+
+    def __init__(
+        self,
+        pos: Tuple[float, float],
+        tile_size: int,
+        speed: float = PLAYER_SPEED,
+        max_hp: float = PLAYER_MAX_HP,
+        radius: float = PLAYER_RADIUS,
+    ):
+        super().__init__(pos, tile_size, speed, radius)
+        self.max_hp = max_hp
+        self.hp = max_hp
+        # Cooldown counted in whole ticks, not float seconds, so fire timing is exact.
+        self.fire_cooldown_ticks = max(1, round(FIRE_COOLDOWN / FIXED_DT))
+        self.cooldown_remaining = 0
+
+    @property
+    def alive(self) -> bool:
+        return self.hp > 0.0
+
+    def take_damage(self, amount: float) -> None:
+        self.hp = max(0.0, self.hp - amount)

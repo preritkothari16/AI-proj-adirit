@@ -13,6 +13,23 @@ PLAYER_SPEED = 150.0  # pixels per second
 PLAYER_MAX_HP = 100.0
 PLAYER_RADIUS = 10.0  # pixels; collision uses a square of side 2*radius
 
+# --- Bullets ---
+BULLET_SPEED = 600.0  # pixels per second (10 px per tick)
+BULLET_RADIUS = 3.0  # pixels, used for drawing and (P2.6) zombie hits
+BULLET_DAMAGE = 25.0  # applied to zombies in P2.6
+FIRE_COOLDOWN = 0.25  # seconds between shots
+
+# --- Dummy zombie (P2.6; fixed stats until genome decoding in P3.4) ---
+ZOMBIE_SPEED = 90.0  # pixels per second, slower than the player
+ZOMBIE_MAX_HP = 50.0  # two bullets
+ZOMBIE_RADIUS = 10.0  # pixels; same square collision as the player
+ZOMBIE_ATTACK_DAMAGE = 10.0  # per hit on the player
+ZOMBIE_ATTACK_COOLDOWN = 1.0  # seconds between hits from one zombie
+ZOMBIE_ATTACK_REACH = 4.0  # pixels of gap allowed between bodies that still counts as contact
+
+# --- Barricades ---
+MAX_BARRICADES = 5  # indestructible; placement rejected if it would seal a spawn off
+
 # --- Waves ---
 NUM_WAVES = 10
 ZOMBIES_PER_WAVE = 20
