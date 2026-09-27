@@ -6,13 +6,14 @@ Format (one character per tile, one line per row):
     S  floor + spawn point
     P  floor + player start
 
-Pathfinding (P1.4) and line-of-sight (P1.5) are not implemented here.
+Pathfinding lives in ai/pathfinding.py (P1.4). Line of sight (P1.5) is a grid
+traversal between tile centres, see has_line_of_sight().
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Callable, Optional, Tuple
 
 Tile = Tuple[int, int]  # (col, row)
 
@@ -108,6 +109,45 @@ class TileMap:
         x, y = tile
         return ((x + 0.5) * self.tile_size, (y + 0.5) * self.tile_size)
 
-    def has_line_of_sight(self, a: Tile, b: Tile) -> bool:
-        """Implemented in P1.5."""
-        raise NotImplementedError
+    def has_line_of_sight(
+        self, a: Tile, b: Tile, is_blocked: Optional[Callable[[Tile], bool]] = None
+    ) -> bool:
+        """True if the straight segment between the centres of `a` and `b`
+        crosses no blocked tile. Endpoints count too, so a blocked `a` or `b`
+        is never visible.
+
+        Supercover traversal in exact integer arithmetic: every tile the
+        segment touches is checked. When the segment passes exactly through a
+        tile corner, both tiles beside the corner are checked, so you can't see
+        through a diagonal gap or graze a wall's corner. Symmetric: LOS(a, b)
+        == LOS(b, a).
+
+        `is_blocked` defaults to walls + out of bounds; World passes its own
+        so barricades block sight too.
+        """
+        blocked = is_blocked if is_blocked is not None else (lambda t: not self.is_walkable(t))
+        x, y = a
+        dx, dy = b[0] - x, b[1] - y
+        nx, ny = abs(dx), abs(dy)
+        sx, sy = (1 if dx > 0 else -1), (1 if dy > 0 else -1)
+
+        if blocked((x, y)):
+            return False
+        ix = iy = 0  # tile boundaries crossed so far on each axis
+        while ix < nx or iy < ny:
+            # Compare where the next x-boundary and next y-boundary are hit along
+            # the segment: (0.5 + ix) / nx vs (0.5 + iy) / ny, cross-multiplied.
+            decision = (1 + 2 * ix) * ny - (1 + 2 * iy) * nx
+            if decision == 0:
+                # exactly through a corner: both side tiles must be clear
+                if blocked((x + sx, y)) or blocked((x, y + sy)):
+                    return False
+                x, y = x + sx, y + sy
+                ix, iy = ix + 1, iy + 1
+            elif decision < 0:
+                x, ix = x + sx, ix + 1
+            else:
+                y, iy = y + sy, iy + 1
+            if blocked((x, y)):
+                return False
+        return True

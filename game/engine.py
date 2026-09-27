@@ -59,6 +59,10 @@ class World:
         candidates = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
         return [t for t in candidates if not self.is_blocked(t)]
 
+    def has_line_of_sight(self, a: Tile, b: Tile) -> bool:
+        """Tile LOS where walls, out-of-bounds tiles and barricades all block sight."""
+        return self.tilemap.has_line_of_sight(a, b, self.is_blocked)
+
     def place_barricade(self, tile: Tile) -> PlacementResult:
         result = check_placement(self, tile)
         if result is PlacementResult.OK:

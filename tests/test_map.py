@@ -1,7 +1,6 @@
 """P1.3 — TileMap loading, dimensions, walls, coordinate conversion.
 
-Pathfinding is not exercised here (P1.4); has_line_of_sight is not
-implemented here (P1.5).
+Pathfinding is tested in test_pathfinding.py, line of sight in test_line_of_sight.py.
 """
 from __future__ import annotations
 
@@ -97,13 +96,6 @@ def test_world_to_tile_round_trip_stays_in_same_tile(tmp_path):
     for tile in [(0, 0), (2, 3), (4, 4)]:
         centre = tm.tile_to_world(tile)
         assert tm.world_to_tile(centre) == tile
-
-
-def test_has_line_of_sight_not_yet_implemented(tmp_path):
-    path = write_map(tmp_path, FIXTURE_MAP)
-    tm = TileMap.load(path)
-    with pytest.raises(NotImplementedError):
-        tm.has_line_of_sight((1, 1), (3, 3))
 
 
 # --- malformed maps ---
