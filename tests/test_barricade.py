@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ai.genome import Genome, PathStrategy
 from ai.pathfinding import astar, greedy_best_first
 from config import MAX_BARRICADES
 from game.barricade import PlacementResult, all_spawns_connected, check_placement
@@ -126,7 +127,7 @@ def test_tile_partly_under_player_rejected(tmp_path):
 
 def test_tile_under_zombie_rejected(tmp_path):
     world = make_world(tmp_path, ROOM)
-    world.spawn_zombie((6, 1))
+    world.spawn_zombie((6, 1), Genome.of(path_strategy=PathStrategy.DIRECT, swarm=0.0))
     assert world.place_barricade((6, 1)) is PlacementResult.OCCUPIED
 
 

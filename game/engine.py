@@ -5,7 +5,7 @@ step(action). Rendering, input and the app loop live in main.py and
 game/renderer.py — this module must never import pygame, so headless runs,
 the BotPlayer and tests work without a window.
 
-Zombies are fixed-stat dummies (P2.6) until genome/FSM/pathfinding land in P3.x.
+Each zombie's stats, movement strategy and swarm weight come from its genome (P3.4).
 Once the player's HP hits 0 the world is over and step() stops advancing.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import List, Optional, Set, Tuple
 
 import numpy as np
 
+from ai.genome import Genome
 from config import FIXED_DT
 from game.barricade import PlacementResult, check_placement
 from game.bullet import Bullet
@@ -32,6 +33,7 @@ class World:
 
         self.player = Player(tilemap.tile_to_world(tilemap.player_start), tilemap.tile_size)
         self.zombies: List[Zombie] = []
+        self._next_zid = 0
         self.bullets: List[Bullet] = []
         self.barricades: Set[Tile] = set()
 
@@ -70,9 +72,10 @@ class World:
         self.last_placement = result
         return result
 
-    def spawn_zombie(self, tile: Tile) -> Zombie:
-        """Add a fixed-stat zombie at the centre of `tile`. Waves take this over in P4.6."""
-        zombie = Zombie(self.tilemap.tile_to_world(tile), self.tilemap.tile_size)
+    def spawn_zombie(self, tile: Tile, genome: Genome) -> Zombie:
+        """Add a zombie built from `genome` at the centre of `tile`. WaveManager (P4.6) calls this."""
+        zombie = Zombie(self._next_zid, genome, self.tilemap.tile_to_world(tile), self.tilemap.tile_size)
+        self._next_zid += 1
         self.zombies.append(zombie)
         return zombie
 
@@ -130,7 +133,7 @@ class World:
 
     def _update_zombies(self) -> None:
         for zombie in self.zombies:
-            zombie.update(FIXED_DT, self.player, self.is_blocked)
+            zombie.update(FIXED_DT, self)
 
 
 def _segment_circle_entry(

@@ -4,7 +4,8 @@ Owns the pygame window, input and frame timing only. All simulation lives in
 World (game/engine.py); this file just turns keys into Actions and calls
 world.step() at the fixed tick rate.
 
-Run:  python main.py
+Run:  python main.py            (F1 toggles the zombie debug overlay)
+      python main.py --debug    (start with the overlay on)
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pygame
 
+from ai.genome import Genome
 from config import FIXED_DT
 from game.engine import World
 from game.map import TileMap
@@ -49,10 +51,10 @@ class HumanController:
         return Action(move=move, aim=(float(mx), float(my)), shoot=buttons[0], barricade=barricade)
 
 
-def main(seed: int = 0, max_frames: int | None = None) -> None:
+def main(seed: int = 0, max_frames: int | None = None, debug: bool = False) -> None:
     pygame.init()
     world = World(TileMap.load(LEVEL1_PATH), np.random.default_rng(seed))
-    renderer = Renderer(world)
+    renderer = Renderer(world, debug=debug)
     screen = pygame.display.set_mode(renderer.screen_size)
     pygame.display.set_caption("Zombie Darwin")
     clock = pygame.time.Clock()
@@ -68,17 +70,19 @@ def main(seed: int = 0, max_frames: int | None = None) -> None:
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 running = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
+                renderer.toggle_debug()
 
         # Fixed timestep: the simulation always advances in FIXED_DT ticks,
         # however long the frame actually took.
         accumulator += clock.tick(TARGET_FPS) / 1000.0
         steps = 0
         while accumulator >= FIXED_DT and steps < MAX_STEPS_PER_FRAME:
-            # Temporary P2.6 spawner: one dummy per spawn point every few seconds.
-            # WaveManager (P4.6) replaces this.
+            # Temporary spawner: one random-genome zombie per spawn point every few
+            # seconds. WaveManager (P4.6) replaces this with evolved genomes.
             if world.tick >= next_spawn_tick and not world.game_over:
                 for tile in world.tilemap.spawn_points:
-                    world.spawn_zombie(tile)
+                    world.spawn_zombie(tile, Genome.random(world.rng))
                 next_spawn_tick = world.tick + round(DEMO_SPAWN_INTERVAL / FIXED_DT)
             world.step(controller.get_action(world))
             accumulator -= FIXED_DT
@@ -100,5 +104,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Play Zombie Darwin")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-frames", type=int, default=None, help="quit after N frames (smoke testing)")
+    parser.add_argument("--debug", action="store_true", help="start with the zombie debug overlay on (F1 toggles)")
     args = parser.parse_args()
-    main(seed=args.seed, max_frames=args.max_frames)
+    main(seed=args.seed, max_frames=args.max_frames, debug=args.debug)

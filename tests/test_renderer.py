@@ -13,6 +13,7 @@ import numpy as np
 import pygame
 import pytest
 
+from ai.genome import Genome, PathStrategy
 from game.engine import World
 from game.map import TileMap
 from game.player import Action, Controller
@@ -105,7 +106,7 @@ def test_draw_paints_zombies_and_game_over(world):
     pygame.init()
     try:
         renderer = Renderer(world)
-        z = world.spawn_zombie((5, 2))
+        z = world.spawn_zombie((5, 2), Genome.of(path_strategy=PathStrategy.DIRECT, swarm=0.0))
         surface = pygame.Surface(renderer.screen_size)
         renderer.draw(surface, world)
         assert surface.get_at((round(z.x), round(z.y)))[:3] == ZOMBIE_COLOUR

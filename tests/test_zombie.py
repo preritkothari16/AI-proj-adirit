@@ -1,4 +1,4 @@
-"""P2.6 — dummy zombie: direct movement, bullet damage, death, contact attacks, player death."""
+"""P2.6 — basic zombie (all-0.5 DIRECT genome): direct movement, bullet damage, death, contact attacks, player death."""
 from __future__ import annotations
 
 import numpy as np
@@ -10,15 +10,19 @@ from config import (
     PLAYER_MAX_HP,
     ZOMBIE_ATTACK_COOLDOWN,
     ZOMBIE_ATTACK_DAMAGE,
-    ZOMBIE_MAX_HP,
-    ZOMBIE_SPEED,
 )
+from ai.genome import Genome, PathStrategy
 from game.engine import World, _segment_circle_entry
 from game.map import TileMap
 from game.player import Action
 from game.zombie import Zombie
 
 TS = 32
+
+# Stand-in for the old fixed-stat zombie: all-0.5 genome, DIRECT, no swarm.
+DUMMY = Genome.of(path_strategy=PathStrategy.DIRECT, swarm=0.0)
+ZOMBIE_MAX_HP = DUMMY.decode().max_hp
+ZOMBIE_SPEED = DUMMY.decode().speed
 ATTACK_TICKS = round(ZOMBIE_ATTACK_COOLDOWN / FIXED_DT)
 
 # 9 wide x 5 tall, player at (4,2); walls on the border only.
@@ -53,7 +57,7 @@ def make_world(tmp_path, text: str = ROOM) -> World:
 def place_next_to_player(world: World) -> Zombie:
     """Zombie touching the player's right side (bodies exactly flush)."""
     p = world.player
-    z = world.spawn_zombie(world.tilemap.world_to_tile(p.pos))
+    z = world.spawn_zombie(world.tilemap.world_to_tile(p.pos), DUMMY)
     z.x = p.x + p.radius + z.radius
     return z
 
@@ -68,7 +72,7 @@ def shoot_at(world: World, target) -> None:
 
 def test_spawn_zombie_at_tile_centre(tmp_path):
     world = make_world(tmp_path)
-    z = world.spawn_zombie((1, 1))
+    z = world.spawn_zombie((1, 1), DUMMY)
     assert z.pos == world.tilemap.tile_to_world((1, 1))
     assert z.hp == ZOMBIE_MAX_HP
     assert world.zombies == [z]
@@ -76,7 +80,7 @@ def test_spawn_zombie_at_tile_centre(tmp_path):
 
 def test_zombie_moves_straight_at_player(tmp_path):
     world = make_world(tmp_path)
-    z = world.spawn_zombie((1, 2))  # same row, left of player
+    z = world.spawn_zombie((1, 2), DUMMY)  # same row, left of player
     x0 = z.x
     world.step(Action())
     assert z.x == pytest.approx(x0 + ZOMBIE_SPEED * FIXED_DT)
@@ -85,7 +89,7 @@ def test_zombie_moves_straight_at_player(tmp_path):
 
 def test_zombie_stops_on_contact(tmp_path):
     world = make_world(tmp_path)
-    z = world.spawn_zombie((1, 2))
+    z = world.spawn_zombie((1, 2), DUMMY)
     for _ in range(300):
         world.step(Action())
     assert z.in_contact(world.player)
@@ -96,9 +100,9 @@ def test_zombie_stops_on_contact(tmp_path):
 
 
 def test_direct_zombie_is_stopped_by_wall(tmp_path):
-    """No pathfinding yet: walking straight at the player through a wall just stalls."""
+    """Player hidden behind a solid wall: the zombie never sees them and cannot get through."""
     world = make_world(tmp_path, WALLED)
-    z = world.spawn_zombie((1, 2))
+    z = world.spawn_zombie((1, 2), DUMMY)
     for _ in range(300):
         world.step(Action())
     assert z.x <= 3 * TS - z.radius + 1e-6
@@ -110,7 +114,7 @@ def test_direct_zombie_is_stopped_by_wall(tmp_path):
 
 def test_bullet_damages_zombie(tmp_path):
     world = make_world(tmp_path)
-    z = world.spawn_zombie((7, 2))
+    z = world.spawn_zombie((7, 2), DUMMY)
     shoot_at(world, z)
     for _ in range(20):
         world.step(Action())
@@ -120,7 +124,7 @@ def test_bullet_damages_zombie(tmp_path):
 
 def test_zombie_dies_at_zero_hp_and_is_removed(tmp_path):
     world = make_world(tmp_path)
-    z = world.spawn_zombie((7, 2))
+    z = world.spawn_zombie((7, 2), DUMMY)
     shots = int(np.ceil(ZOMBIE_MAX_HP / BULLET_DAMAGE))
     for _ in range(shots):
         shoot_at(world, z)
@@ -132,15 +136,15 @@ def test_zombie_dies_at_zero_hp_and_is_removed(tmp_path):
 
 
 def test_hp_never_negative():
-    z = Zombie((0.0, 0.0), TS)
+    z = Zombie(0, DUMMY, (0.0, 0.0), TS)
     z.take_damage(ZOMBIE_MAX_HP * 10)
     assert z.hp == 0.0
 
 
 def test_bullet_hits_only_the_first_zombie_in_line(tmp_path):
     world = make_world(tmp_path)
-    near = world.spawn_zombie((6, 2))
-    far = world.spawn_zombie((7, 2))
+    near = world.spawn_zombie((6, 2), DUMMY)
+    far = world.spawn_zombie((7, 2), DUMMY)
     shoot_at(world, far)
     for _ in range(20):
         world.step(Action())
@@ -150,7 +154,7 @@ def test_bullet_hits_only_the_first_zombie_in_line(tmp_path):
 
 def test_miss_does_no_damage(tmp_path):
     world = make_world(tmp_path)
-    z = world.spawn_zombie((7, 3))
+    z = world.spawn_zombie((7, 3), DUMMY)
     world.step(Action(shoot=True, aim=(world.player.x, 0.0)))  # fire straight up, away from zombie
     for _ in range(30):
         world.step(Action())
@@ -170,7 +174,8 @@ def test_segment_test_catches_fast_bullets():
 def test_contact_damages_player(tmp_path):
     world = make_world(tmp_path)
     z = place_next_to_player(world)
-    world.step(Action())
+    world.step(Action())  # WANDER -> CHASE (sees player; FSM never jumps straight to ATTACK)
+    world.step(Action())  # CHASE -> ATTACK, first hit
     assert world.player.hp == pytest.approx(PLAYER_MAX_HP - ZOMBIE_ATTACK_DAMAGE)
     assert z.damage_dealt == pytest.approx(ZOMBIE_ATTACK_DAMAGE)
 
@@ -185,7 +190,7 @@ def test_attack_cooldown(tmp_path):
 
 def test_no_damage_without_contact(tmp_path):
     world = make_world(tmp_path)
-    world.spawn_zombie((1, 1))
+    world.spawn_zombie((1, 1), DUMMY)
     world.step(Action())
     assert world.player.hp == PLAYER_MAX_HP
 
@@ -209,6 +214,7 @@ def test_player_dies_and_world_stops(tmp_path):
 def test_killing_zombie_stops_its_attacks(tmp_path):
     world = make_world(tmp_path)
     z = place_next_to_player(world)
+    world.step(Action())
     world.step(Action())  # first hit lands
     hp = world.player.hp
     z.take_damage(ZOMBIE_MAX_HP)
@@ -221,7 +227,7 @@ def test_killing_zombie_stops_its_attacks(tmp_path):
 def test_player_can_shoot_approaching_zombies(tmp_path):
     """End-to-end: player holding fire at an approaching zombie kills it before it arrives."""
     world = make_world(tmp_path)
-    z = world.spawn_zombie((1, 2))
+    z = world.spawn_zombie((1, 2), DUMMY)
     for _ in range(300):
         world.step(Action(shoot=True, aim=z.pos))
     assert not z.alive

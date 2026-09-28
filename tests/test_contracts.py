@@ -1,8 +1,7 @@
 """P1.2 — import/interface tests for the frozen data contracts.
 
-These check shapes and types only. No behaviour is tested here — the
-NotImplementedError stubs are expected and are exercised by their own
-phases (P3.1, P4.1, P4.5).
+These check shapes and types only. Behaviour is tested in each phase's own
+test file; the remaining NotImplementedError stub (compute_fitness) lands in P4.5.
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ import pytest
 from ai.fitness import FitnessStats, compute_fitness
 from ai.genome import GENE_NAMES, NUM_GENES, Genome, PathStrategy, ZombieStats
 from game.player import Action, Controller
-from game.states import FSMInputs, ZombieState, next_state
+from game.states import FSMInputs, ZombieState
 
 
 # --- ai.genome ---
@@ -51,15 +50,10 @@ def test_genome_rejects_wrong_shape():
         Genome(np.zeros(NUM_GENES - 1))
 
 
-def test_genome_stub_methods_raise():
-    g = Genome(np.zeros(NUM_GENES))
+def test_genome_methods_return_genomes():
     rng = np.random.default_rng(0)
-    with pytest.raises(NotImplementedError):
-        Genome.random(rng)
-    with pytest.raises(NotImplementedError):
-        g.repair()
-    with pytest.raises(NotImplementedError):
-        g.decode()
+    assert isinstance(Genome.random(rng), Genome)
+    assert isinstance(Genome(np.zeros(NUM_GENES)).repair(), Genome)
 
 
 # --- ai.fitness ---
@@ -96,18 +90,6 @@ def test_fsm_inputs_construction():
     assert inputs.sees_player is True
     with pytest.raises(dataclasses.FrozenInstanceError):
         inputs.sees_player = False  # frozen
-
-
-def test_next_state_stub_raises():
-    inputs = FSMInputs(
-        sees_player=False,
-        dist_to_player=0.0,
-        time_since_seen=0.0,
-        give_up_time=0.0,
-        attack_range=0.0,
-    )
-    with pytest.raises(NotImplementedError):
-        next_state(ZombieState.WANDER, inputs)
 
 
 # --- game.player ---
