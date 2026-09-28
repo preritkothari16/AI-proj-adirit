@@ -30,7 +30,8 @@ zombie_darwin/
     pathfinding.py   # astar, greedy_best_first, is_reachable (BFS)
     genome.py        # ✅ Genome (random/repair/decode), ZombieStats, PathStrategy
     fitness.py       # ✅ FitnessStats (compute_fitness stubbed: P4.5)
-    genetic.py       # Optimizer protocol, GeneticAlgorithm, RandomSearch
+    genetic.py       # ✅ Optimizer protocol, GA operators, GeneticAlgorithm, RandomSearch
+    toy_benchmark.py # ✅ GA vs RandomSearch sanity check on a toy target-genome problem
     hill_climbing.py # HillClimber
     kmeans.py        # stretch
     bot_player.py    # BotPlayer (Controller)
@@ -75,13 +76,15 @@ Checkpoints: IC1 Map↔Pathfinding · IC2 Barricade↔BFS · IC3 Genome↔Zombie
 - P3.4 — Genome-driven zombies: `Genome.decode()` + `Zombie(zid, genome, pos)`; swarm steering.
 - P3.5 — Zombie debug overlay (F1 / `--debug`): vision circles, routes, last known position, state + strategy labels. **M3 done.**
 - P4.1 — `Genome.random(rng, budget)` / `repair(budget)` (ranges + stat budget), `budget_used()`.
+- P4.2 — GA operators (tournament, top-2 elitism, uniform crossover, Gaussian per-gene mutation, repair) + `GeneticAlgorithm.next_generation`.
+- P4.3 — `RandomSearch` baseline + toy benchmark (`python -m ai.toy_benchmark`): GA converges, beats Random on every seed.
 ### In Progress
 - None.
 ### Not Started
-- P4.2 onward.
+- P4.4 onward.
 
 ## Current Phase
-M4 Evolution. Next: **P4.2**.
+M4 Evolution. Next: **P4.4** (HillClimber).
 
 ## Important Interfaces
 (Frozen in P1.2 — implemented, not stubs, unless noted. Change only by agreement.)
@@ -96,7 +99,7 @@ M4 Evolution. Next: **P4.2**.
 - `game/zombie.py`: `Zombie(Body)(zid, genome, pos, tile_size=TILE_SIZE)` — `stats = genome.decode()` gives `speed, max_hp, vision_radius, give_up_time, path_strategy, swarm_weight`; radius / attack damage / cooldown / reach are shared config. Keeps `zid, genome, stats`. `swarm_force(world) -> (fx, fy)`. `hp, max_hp, alive, take_damage()`, `damage_dealt`, `gap_to(player)`, `in_contact(player)`, `sees_player(world)` (≤ `vision_radius` px centre-to-centre AND `world.has_line_of_sight` between tiles). FSM state: `state`, `last_known_pos` (px), `ticks_since_seen` / `time_since_seen` (inf if never), `wander_target`. Navigation: `path`, `path_goal`, `repaths`, `nodes_expanded`. `update(dt, world)`: perceive → `next_state` → act (WANDER random floor tile via `world.rng`, CHASE player, SEARCH `last_known_pos` then wait, ATTACK hit on cooldown, standing still).
 - `game/engine.py`: `World(tilemap, rng)` — `rng` must be `np.random.Generator`. Attributes: `tilemap`, `rng`, `player: Player` (spawned at centre of `player_start`), `zombies: list[Zombie]`, `bullets: list[Bullet]`, `barricades: set[Tile]`, `tick`, `last_action`, `last_placement: PlacementResult | None`. `time` = `tick * FIXED_DT`. `is_blocked(tile)` = wall, out of bounds, or barricade. `neighbors(tile)` = 4-dir unblocked tiles, so **World is a `GraphLike`** — zombies path over `world`, not `tilemap`. `place_barricade(tile) -> PlacementResult`. `spawn_zombie(tile, genome) -> Zombie` (sequential `zid`s from 0). `has_line_of_sight(a, b)` = tilemap LOS with `is_blocked` (barricades block sight). `game_over` = player HP 0. `step(action)`: no-op once `game_over`; else place barricade if `action.barricade` → move player → fire if `action.shoot` and cooldown ready (toward `action.aim`, a world-pixel point; no shot if aim == player centre) → update bullets (segment-vs-circle hit test on each bullet's per-tick path; first zombie hit takes `bullet.damage`, bullet dies) → drop dead bullets and zombies → zombies update (move/attack) → tick += 1.
 - `game/wave_manager.py`: `start_wave(genomes)`, `update(world)`, `is_over()`, `results() -> list[(Genome, FitnessStats)]`.
-- `ai/genetic.py`: `Optimizer.next_generation(genomes, fitnesses) -> list[Genome]`; `GeneticAlgorithm`, `RandomSearch`. `ai/hill_climbing.py`: `HillClimber`. All take `rng`.
+- `ai/genetic.py`: `Optimizer` (`@runtime_checkable Protocol`): `initial_population() -> list[Genome]`, `next_generation(genomes, fitnesses) -> list[Genome]` (same length; fitness higher = better; length mismatch / empty / NaN → `ValueError`; input not modified). `GeneticAlgorithm(rng, population_size=POPULATION_SIZE, tournament_size=TOURNAMENT_SIZE, elitism=ELITISM_COUNT, crossover_rate, mutation_rate, mutation_sigma, budget=STAT_BUDGET)`. Pure operators: `elite_indices(fit, k)` (best first, ties → earlier index), `tournament_select(fit, rng, size)` (distinct contestants, capped at pop size, ties → earlier), `uniform_crossover(a, b, rng, rate) -> (c1, c2)` (prob `rate`: fair coin per gene, c2 = complement; else copies), `mutate(g, rng, rate, sigma)` (each gene w.p. rate += N(0, sigma); **unrepaired**). `RandomSearch(rng, population_size, budget)`: fresh `Genome.random` population every generation, fitness validated but ignored. `ai/toy_benchmark.py`: `TOY_TARGET` (valid genome), `toy_fitness(target) -> Callable[[Genome], float]` (= −Euclidean gene distance), `run(optimizer, fitness, generations) -> RunResult(best_so_far, mean_per_generation, best_genome, evaluations)`, `compare(seeds, generations)` over `OPTIMIZERS` dict (add HillClimber here in P4.4). `ai/hill_climbing.py`: `HillClimber`. All take `rng`.
 - `analytics/logger.py`: `RunLogger(path).log_generation(gen, genomes, fitnesses)`.
 
 ## Architectural Decisions
@@ -105,6 +108,9 @@ M4 Evolution. Next: **P4.2**.
 - **Fixed timestep (FIXED_DT = 1/60) + seeded `np.random.Generator` passed in.** Why: reproducible, headless == rendered.
 - **Human and bot share `Controller -> Action`.** Why: BotPlayer is drop-in.
 - **Genes in [0,1]; speed+health+vision share a fixed stat budget (`repair()`), sum == budget exactly (not ≤).** Why: forces trade-offs; otherwise GA maxes everything. Exact sum (per config comment) means no zombie wastes points and the budget experiment compares like with like; ratio-preserving rescale keeps the genome's "shape" (which stat it favours). Non-stat genes are behaviours, so free.
+- **GA generation (P4.2):** elites (top `ELITISM_COUNT`=2, copied unchanged, first in the list) → repeat: 2 tournament parents (size 3) → uniform crossover (0.9) → mutate each child (per gene 0.1, Gaussian σ=`MUTATION_SIGMA`=0.1, new config) → `repair(budget)`; odd leftover slot drops the 2nd child. Population size = input size. All randomness via the passed `rng`. Why: textbook operators, each unit-testable; Gaussian (not uniform reset) keeps mutation local so evolution is gradual and visible across waves; repair after mutation keeps every genome valid.
+- **Toy benchmark (P4.3):** per seed each optimizer gets `default_rng(seed)` → identical initial populations, same pop size × generations = same evaluations; metric = best fitness so far. Results (10 seeds, 50 gens): distance GA 0.008 vs Random 0.16; 30 seeds × 100 gens: GA 0.003 vs Random 0.17, GA wins 30/30. Why: proves the GA converges on a known optimum before trusting it on noisy game fitness.
+- **`slow` pytest marker** (registered in pyproject.toml) for multi-seed statistical tests; runs by default, skip with `-m "not slow"`.
 - **Common `Optimizer` interface; HC = 20 parallel hill climbers; RandomSearch baseline.** Why: fair comparison, same evaluation budget.
 - **`states.py` = zombie FSM (pure function), not screen states.** Screen states live in `main.py`. Why: FSM unit-testable without World.
 - **`engine.py` holds `World` (logic), not the pygame loop.** Why: keeps pygame out of simulation.
@@ -149,10 +155,13 @@ M4 Evolution. Next: **P4.2**.
 - Older zombie tests spawn with `Genome.of(path_strategy=..., swarm=0.0)` (all-0.5 stats = old dummy). `tests/test_movement.py` uses x-ray chasers; `tests/test_zombie.py` contact tests step twice (WANDER→CHASE→ATTACK).
 - `tests/test_debug_overlay.py` — 13 tests: off by default + toggle, distinct state colours, planned path pixels only in debug, DIRECT straight line to player, vision circle, SEARCH X marker, label pixels, every state draws, overlay doesn't mutate world/rng, `main.py --debug` runs.
 - `tests/test_genome.py` — 62 tests: random valid ×1000, deterministic per seed, varies across seeds/calls, ignores global numpy state, strategies ~1/3 each, free genes span [0,1], custom budgets 0–3; repair clips each non-stat gene (boundaries ±1e-12, ±inf), rejects NaN / bad budget, leaves in-range free genes alone, scale down/up keeping ratios, cap + redistribute, cascading caps, all-zero even split, exact budget unchanged, clip-before-rescale, budget 0 and 3, 6000 random raw genomes valid, idempotent, no mutation, stat order preserved, trade-off; decode: strategy bin boundaries (1/3, 2/3, clipped), range ends, random decodes in range + float types, pure, repair doesn't change behaviour-gene decoding.
-- **316/316 passing** (`python -m pytest -q`).
+- `tests/test_genetic.py` — 49 tests: config defaults, Optimizer protocol, seeded valid initial population, bad params; elitism (best-first + ties, top-2 unchanged, copies not aliases, best never lost over 30 gens, unchanged under 100 % mutation, elitism 0); population size constant for n=1..50, input untouched, bad fitness rejected; children repaired (incl. custom budget), deterministic per seed, toy objective climbs; tournament (winner = best contestant via replayed draws, full-size picks best, size 1 uniform, worst never wins, P(best)=3/20); crossover (fixed-seed replay, complementary children, 50/50 per gene, rate 0 copies, rate frequency, identical parents); mutation (per-gene ≈10 % over 20k samples, independence 0.9^6, still ≈10 % through repair on free genes, σ matches, rates 0/0.5/1, seeded + no input mutation, repair fixes out-of-range); no game/pygame import.
+- `tests/test_toy_benchmark.py` — 21 tests: RandomSearch (protocol, size + validity, ignores fitness, keeps nothing, validation, same gen-0 as GA); toy fitness (target valid, 0 at target, monotone, target copied); harness (per-gen records, eval count, best-so-far monotone, deterministic + fair); sanity: GA < 0.03 from target on 5 seeds by gen 50, population mean converges, Random doesn't, GA beats Random every seed; `slow`: 30 seeds × 100 gens statistical win; CLI output; module pure.
+- **386/386 passing** (~20 s; `-m "not slow"` skips 1) (`python -m pytest -q`).
 
 ## Next Tasks
-1. P4.2 (next M4 task).
+1. P4.4 HillClimber (add to `toy_benchmark.OPTIMIZERS`).
+2. P4.5 fitness.
 
 ## Last Session Summary
-Implemented P4.1: `Genome.random(rng, budget)` and `Genome.repair(budget)` in `ai/genome.py` (clip to [0,1]; speed+health+vision rescaled to sum exactly to `STAT_BUDGET`, ratio-preserving with cap-and-redistribute), `budget_used()`. `decode` from P3.4 unchanged. Demo spawner now uses `Genome.random`. Added `tests/test_genome.py` (62); contract test updated. 316/316 passing. P3.1–P4.1 not yet committed.
+Implemented P4.3: `RandomSearch` in `ai/genetic.py`; `ai/toy_benchmark.py` (toy fitness = −distance to target genome, `run`/`compare`, CLI table). GA converges (≈0.003–0.008 from target) and beats Random on every seed. Added `slow` marker, `tests/test_toy_benchmark.py` (21). 386/386 passing. Committed with P4.2 (see git log).

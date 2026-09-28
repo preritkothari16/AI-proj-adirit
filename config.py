@@ -52,6 +52,7 @@ TOURNAMENT_SIZE = 3
 ELITISM_COUNT = 2
 CROSSOVER_RATE = 0.9
 MUTATION_RATE = 0.10  # per-gene probability
+MUTATION_SIGMA = 0.10  # std-dev of the Gaussian added to a mutated gene (genes live in [0, 1])
 
 # --- Genome stat budget (placeholder, tune in P6.1) ---
 # speed + health + vision genes are rescaled to sum to this by Genome.repair() (random, mutation, crossover),

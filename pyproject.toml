@@ -1,3 +1,6 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: longer statistical runs (a few seconds); skip with -m \"not slow\"",
+]
