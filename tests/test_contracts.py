@@ -1,7 +1,7 @@
 """P1.2 — import/interface tests for the frozen data contracts.
 
 These check shapes and types only. Behaviour is tested in each phase's own
-test file; the remaining NotImplementedError stub (compute_fitness) lands in P4.5.
+test file; compute_fitness was implemented in P4.5.
 """
 from __future__ import annotations
 
@@ -67,9 +67,8 @@ def test_fitness_stats_defaults():
     assert stats.reached_player is False
 
 
-def test_compute_fitness_stub_raises():
-    with pytest.raises(NotImplementedError):
-        compute_fitness(FitnessStats())
+def test_compute_fitness_returns_float():
+    assert isinstance(compute_fitness(FitnessStats()), float)
 
 
 # --- game.states ---

@@ -41,6 +41,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from ai.fitness import FitnessStats
 from ai.genome import Genome, PathStrategy
 from ai.pathfinding import astar, greedy_best_first
 from config import (
@@ -81,7 +82,8 @@ class Zombie(Body):
         self.swarm_weight = stats.swarm_weight
         self.attack_cooldown_ticks = max(1, round(ZOMBIE_ATTACK_COOLDOWN / FIXED_DT))
         self.attack_cooldown_remaining = 0
-        self.damage_dealt = 0.0  # feeds FitnessStats later (P4.5)
+        self.fitness_stats = FitnessStats()  # live wave stats, scored by ai.fitness.compute_fitness
+        self.ticks_alive = 0
 
         # perception + FSM
         self.vision_radius = stats.vision_radius
@@ -109,6 +111,10 @@ class Zombie(Body):
 
     def take_damage(self, amount: float) -> None:
         self.hp = max(0.0, self.hp - amount)
+
+    @property
+    def damage_dealt(self) -> float:
+        return self.fitness_stats.damage_dealt
 
     def gap_to(self, player: Player) -> float:
         return math.hypot(player.x - self.x, player.y - self.y) - self.radius - player.radius
@@ -187,11 +193,22 @@ class Zombie(Body):
             self._search(dt, world)
         else:
             self._wander(dt, world)
+        self._track_fitness(world.player)
+
+    def _track_fitness(self, player: Player) -> None:
+        """Update FitnessStats after this tick's move. Only runs while alive, so time_alive stops at death."""
+        fs = self.fitness_stats
+        self.ticks_alive += 1  # whole ticks, converted once: no float drift
+        fs.time_alive = self.ticks_alive * FIXED_DT
+        gap = max(0.0, self.gap_to(player))
+        fs.min_dist_to_player = min(fs.min_dist_to_player, gap)
+        if self.in_contact(player):
+            fs.reached_player = True
 
     def _attack(self, player: Player) -> None:
         if self.attack_cooldown_remaining == 0 and player.alive:
             player.take_damage(self.attack_damage)
-            self.damage_dealt += self.attack_damage
+            self.fitness_stats.damage_dealt += self.attack_damage
             self.attack_cooldown_remaining = self.attack_cooldown_ticks
 
     def _search(self, dt: float, world: "World") -> None:

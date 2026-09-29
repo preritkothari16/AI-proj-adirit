@@ -54,6 +54,19 @@ CROSSOVER_RATE = 0.9
 MUTATION_RATE = 0.10  # per-gene probability
 MUTATION_SIGMA = 0.10  # std-dev of the Gaussian added to a mutated gene (genes live in [0, 1])
 
+# --- Fitness (P4.5; weights are placeholders, tune in P6.1) ---
+# fitness = sum(weight * term), every term in [0, 1] -> fitness in [0, sum of weights] (= 1 with these).
+# damage    = damage_dealt / FITNESS_DAMAGE_REF            (capped at 1)
+# proximity = 1 - min_gap_to_player / FITNESS_DISTANCE_REF (capped to [0, 1]; never approached = 0)
+# survival  = time_alive / WAVE_TIME_LIMIT                 (capped at 1)
+# reached   = 1 if the zombie ever touched the player else 0
+FITNESS_W_DAMAGE = 0.5
+FITNESS_W_PROXIMITY = 0.25
+FITNESS_W_SURVIVAL = 0.1
+FITNESS_W_REACHED = 0.15
+FITNESS_DAMAGE_REF = PLAYER_MAX_HP  # HP; total damage that kills the player
+FITNESS_DISTANCE_REF = GRID_WIDTH * TILE_SIZE  # px: map width; a gap this big or more scores 0 proximity
+
 # --- Genome stat budget (placeholder, tune in P6.1) ---
 # speed + health + vision genes are rescaled to sum to this by Genome.repair() (random, mutation, crossover),
 # forcing trade-offs instead of every zombie maxing all stats.

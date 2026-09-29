@@ -10,6 +10,11 @@ Debug overlay (toggle with F1 in main.py), per zombie, coloured by FSM state:
     the point it is heading for (player / last known position / wander tile)
   - last known player position (X) while searching
   - label: state and path strategy
+
+With a GameSession (P4.7) draw() also shows the game-flow HUD (wave, timer, HP,
+zombies remaining on the top wall row; evolution summary on the bottom one) and
+the menu / between-wave report / victory / game-over panels. Without one it
+falls back to the plain HP + zombie-count HUD.
 """
 from __future__ import annotations
 
@@ -17,7 +22,9 @@ import pygame
 
 from ai.genome import PathStrategy
 from game.engine import World
+from game.session import GameSession, Phase, WaveReport
 from game.states import ZombieState
+from game.wave_manager import WaveEnd
 
 FLOOR_COLOUR = (40, 40, 46)
 WALL_COLOUR = (95, 95, 105)
@@ -39,6 +46,99 @@ STATE_COLOURS = {
     ZombieState.ATTACK: (220, 80, 255),
 }
 STRATEGY_LABELS = {PathStrategy.DIRECT: "direct", PathStrategy.GREEDY: "greedy", PathStrategy.ASTAR: "A*"}
+PANEL_COLOUR = (24, 24, 30)
+PANEL_BORDER = (150, 150, 165)
+DIM_TEXT_COLOUR = (170, 170, 180)
+END_REASON_TEXT = {
+    WaveEnd.ALL_DEAD: "all zombies destroyed",
+    WaveEnd.TIME_UP: "time ran out",
+    WaveEnd.PLAYER_DEAD: "you were killed",
+}
+
+
+# --- text for the HUD and screens (pure, so tests can check it without pixels) ---
+
+
+def status_line(session: GameSession) -> str:
+    """Top HUD: wave, timer, HP, zombies remaining."""
+    p = session.world.player
+    return (
+        f"Wave {session.wave}/{session.num_waves}   Time {session.time_left:.0f}s   "
+        f"HP {p.hp:.0f}/{p.max_hp:.0f}   Zombies {session.zombies_remaining}/{session.zombies_total}"
+    )
+
+
+def traits_text(pop) -> str:
+    c = pop.strategy_counts
+    return (
+        f"spd {pop.mean_speed:.0f}  hp {pop.mean_hp:.0f}  vis {pop.mean_vision:.0f}  "
+        f"A*/Greedy/Direct {c[PathStrategy.ASTAR]}/{c[PathStrategy.GREEDY]}/{c[PathStrategy.DIRECT]}"
+    )
+
+
+def evolution_line(session: GameSession) -> str:
+    """Bottom HUD: how the last wave scored and what the current population looks like."""
+    pop = session.population_summary
+    if pop is None:
+        return ""
+    last = session.last_report
+    if last is None:
+        fitness = "random first generation"
+    else:
+        fitness = f"last wave fitness best {last.best_fitness:.2f} avg {last.mean_fitness:.2f}"
+        if len(session.history) > 1:
+            fitness += f" ({last.mean_fitness - session.history[-2].mean_fitness:+.2f})"
+    return f"Evolution  {fitness}  |  {traits_text(pop)}"
+
+
+def _fitness_trend(session: GameSession) -> str:
+    return "Avg zombie fitness per wave: " + "  ".join(f"{r.mean_fitness:.2f}" for r in session.history)
+
+
+def _report_lines(r: WaveReport, session: GameSession) -> list[str]:
+    lines = [
+        f"Ended: {END_REASON_TEXT[r.end_reason]}   Time {r.time:.0f}s",
+        f"Zombies killed {r.zombies_killed}/{r.zombies_total}   Your HP {r.player_hp:.0f}/{r.player_max_hp:.0f}",
+        f"Fitness  best {r.best_fitness:.2f}   avg {r.mean_fitness:.2f}   worst {r.worst_fitness:.2f}",
+        f"Avg damage dealt per zombie {r.mean_damage:.1f}",
+        "",
+        "This wave:  " + traits_text(r.fought),
+    ]
+    if r.evolved is not None:
+        lines.append("Evolved to: " + traits_text(r.evolved))
+    if len(session.history) > 1:
+        lines += ["", _fitness_trend(session)]
+    return lines
+
+
+def screen_text(session: GameSession) -> tuple[str, list[str]] | None:
+    """(title, body lines) of the panel for the current phase; None during a wave."""
+    phase = session.phase
+    if phase is Phase.MENU:
+        return "ZOMBIE DARWIN", [
+            f"Survive {session.num_waves} waves. The zombies evolve between waves.",
+            "",
+            "WASD / arrows  move        Mouse  aim",
+            "Left click  shoot        Right click  barricade",
+            "F1  debug overlay        Esc  quit",
+            "",
+            "Press ENTER to start",
+        ]
+    report = session.last_report
+    if report is None:
+        return None
+    if phase is Phase.REPORT:
+        return f"WAVE {report.wave} COMPLETE", _report_lines(report, session) + [
+            "",
+            f"Press ENTER for wave {report.wave + 1}",
+        ]
+    if phase is Phase.VICTORY:
+        head = [f"You survived all {session.num_waves} waves!", ""]
+        return "VICTORY", head + _report_lines(report, session) + ["", "Press ENTER to play again"]
+    if phase is Phase.GAME_OVER:
+        head = [f"You fell on wave {report.wave} of {session.num_waves}.", ""]
+        return "GAME OVER", head + _report_lines(report, session) + ["", "Press ENTER to play again"]
+    return None
 
 
 class Renderer:
@@ -70,7 +170,7 @@ class Renderer:
                 pygame.draw.rect(surface, GRID_COLOUR, rect, width=1)
         return surface
 
-    def draw(self, surface: pygame.Surface, world: World) -> None:
+    def draw(self, surface: pygame.Surface, world: World, session: GameSession | None = None) -> None:
         surface.blit(self._background, (0, 0))
         ts = world.tilemap.tile_size
         for tx, ty in world.barricades:
@@ -87,7 +187,51 @@ class Renderer:
         # bullets last so the aim line never hides them
         for bullet in world.bullets:
             pygame.draw.circle(surface, BULLET_COLOUR, (round(bullet.x), round(bullet.y)), round(bullet.radius))
-        self._draw_hud(surface, world)
+        if session is None:
+            self._draw_hud(surface, world)
+        else:
+            self._draw_session(surface, session)
+
+    def _draw_session(self, surface: pygame.Surface, session: GameSession) -> None:
+        if session.phase is not Phase.MENU:
+            self._draw_bar_text(surface, status_line(session), top=True)
+            self._draw_bar_text(surface, evolution_line(session), top=False)
+        screen = screen_text(session)
+        if screen is not None:
+            self._draw_panel(surface, *screen)
+
+    def _draw_bar_text(self, surface: pygame.Surface, text: str, top: bool) -> None:
+        if self._font is None:
+            self._font = pygame.font.Font(None, 24)
+        if self._small_font is None:
+            self._small_font = pygame.font.Font(None, 16)
+        # HUD lives on the solid border wall rows so it never covers playable floor.
+        label = self._font.render(text, True, TEXT_COLOUR)
+        y = 6 if top else self.screen_size[1] - label.get_height() - 8
+        surface.blit(label, (8, y))
+        if top and self.debug:
+            hint = self._small_font.render("[F1] debug", True, DIM_TEXT_COLOUR)
+            surface.blit(hint, (self.screen_size[0] - hint.get_width() - 8, 10))
+
+    def _draw_panel(self, surface: pygame.Surface, title: str, lines: list[str]) -> None:
+        shade = pygame.Surface(self.screen_size, pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 170))
+        surface.blit(shade, (0, 0))
+        title_font, body_font = pygame.font.Font(None, 64), pygame.font.Font(None, 26)
+        title_img = title_font.render(title, True, TEXT_COLOUR)
+        body = [body_font.render(line, True, TEXT_COLOUR if line else DIM_TEXT_COLOUR) for line in lines]
+        line_h = body_font.get_linesize()
+        width = max([title_img.get_width()] + [b.get_width() for b in body]) + 48
+        height = title_img.get_height() + line_h * len(body) + 48
+        panel = pygame.Rect(0, 0, width, height)
+        panel.center = (self.screen_size[0] // 2, self.screen_size[1] // 2)
+        pygame.draw.rect(surface, PANEL_COLOUR, panel)
+        pygame.draw.rect(surface, PANEL_BORDER, panel, width=2)
+        surface.blit(title_img, title_img.get_rect(midtop=(panel.centerx, panel.top + 20)))
+        y = panel.top + 20 + title_img.get_height() + 8
+        for img in body:
+            surface.blit(img, img.get_rect(midtop=(panel.centerx, y)))
+            y += line_h
 
     def _draw_zombie(self, surface: pygame.Surface, zombie) -> None:
         centre = (round(zombie.x), round(zombie.y))

@@ -1,8 +1,11 @@
-"""Zombie Darwin — playable entry point (P2.3).
+"""Zombie Darwin — playable entry point (P2.3, game flow P4.7).
 
-Owns the pygame window, input and frame timing only. All simulation lives in
-World (game/engine.py); this file just turns keys into Actions and calls
-world.step() at the fixed tick rate.
+Owns the pygame window, input and frame timing only. All simulation and game
+flow live in GameSession (game/session.py: menu -> wave -> report -> ... ->
+victory / game over, with the zombies evolving between waves); this file turns
+keys into Actions and calls session.step() at the fixed tick rate.
+
+Keys: ENTER / SPACE start, next wave, play again.  F1 debug overlay.  Esc quit.
 
 Run:  python main.py            (F1 toggles the zombie debug overlay)
       python main.py --debug    (start with the overlay on)
@@ -12,19 +15,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pygame
 
-from ai.genome import Genome
 from config import FIXED_DT
-from game.engine import World
 from game.map import TileMap
 from game.player import Action
 from game.renderer import Renderer
+from game.session import GameSession, Phase
 
 LEVEL1_PATH = Path(__file__).resolve().parent / "maps" / "level1.txt"
 TARGET_FPS = 60
-DEMO_SPAWN_INTERVAL = 6.0  # seconds, temporary until WaveManager (P4.6)
 MAX_STEPS_PER_FRAME = 5  # stops a long stall (e.g. dragging the window) turning into a burst of ticks
 
 
@@ -51,46 +51,51 @@ class HumanController:
         return Action(move=move, aim=(float(mx), float(my)), shoot=buttons[0], barricade=barricade)
 
 
+def handle_keydown(session: GameSession, renderer: Renderer, key: int) -> bool:
+    """Apply one key press. Returns False when the game should quit."""
+    if key == pygame.K_ESCAPE:
+        return False
+    if key == pygame.K_F1:
+        renderer.toggle_debug()
+    elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+        if session.phase in (Phase.MENU, Phase.VICTORY, Phase.GAME_OVER):
+            session.start()
+        elif session.phase is Phase.REPORT:
+            session.next_wave()
+    return True
+
+
 def main(seed: int = 0, max_frames: int | None = None, debug: bool = False) -> None:
     pygame.init()
-    world = World(TileMap.load(LEVEL1_PATH), np.random.default_rng(seed))
-    renderer = Renderer(world, debug=debug)
+    session = GameSession(TileMap.load(LEVEL1_PATH), seed=seed)
+    renderer = Renderer(session.world, debug=debug)
     screen = pygame.display.set_mode(renderer.screen_size)
     pygame.display.set_caption("Zombie Darwin")
     clock = pygame.time.Clock()
     controller = HumanController()
 
     accumulator = 0.0
-    next_spawn_tick = 0
     frames = 0
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
-                renderer.toggle_debug()
+            elif event.type == pygame.KEYDOWN:
+                running = handle_keydown(session, renderer, event.key) and running
 
         # Fixed timestep: the simulation always advances in FIXED_DT ticks,
-        # however long the frame actually took.
+        # however long the frame actually took. Only waves tick; menu and reports wait.
         accumulator += clock.tick(TARGET_FPS) / 1000.0
         steps = 0
-        while accumulator >= FIXED_DT and steps < MAX_STEPS_PER_FRAME:
-            # Temporary spawner: one random-genome zombie per spawn point every few
-            # seconds. WaveManager (P4.6) replaces this with evolved genomes.
-            if world.tick >= next_spawn_tick and not world.game_over:
-                for tile in world.tilemap.spawn_points:
-                    world.spawn_zombie(tile, Genome.random(world.rng))
-                next_spawn_tick = world.tick + round(DEMO_SPAWN_INTERVAL / FIXED_DT)
-            world.step(controller.get_action(world))
+        while accumulator >= FIXED_DT and steps < MAX_STEPS_PER_FRAME and session.phase is Phase.WAVE:
+            session.step(controller.get_action(session.world))
             accumulator -= FIXED_DT
             steps += 1
-        if steps == MAX_STEPS_PER_FRAME:
+        if steps == MAX_STEPS_PER_FRAME or session.phase is not Phase.WAVE:
             accumulator = 0.0
 
-        renderer.draw(screen, world)
+        renderer.draw(screen, session.world, session)
         pygame.display.flip()
 
         frames += 1
