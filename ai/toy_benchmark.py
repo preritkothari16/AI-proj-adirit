@@ -1,10 +1,10 @@
-"""Optimizer sanity benchmark on a toy problem (P4.3). Not a game experiment.
+"""Optimizer sanity benchmark on a toy problem (P4.3; HillClimber added P4.4). Not a game experiment.
 
 Toy fitness = -(Euclidean distance between a genome's genes and a fixed target
 genome). The target is itself a repaired genome, so the optimum (fitness 0) is
 reachable under the stat budget. Higher is better, like the real fitness.
 
-Comparable conditions: for each seed, GA and RandomSearch get
+Comparable conditions: for each seed, every optimizer gets
   - their own Generator built from the same seed, so their initial populations
     are identical (both start with population_size Genome.random() calls),
   - the same population size and number of generations = same evaluations.
@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Sequence
 import numpy as np
 
 from ai.genetic import GeneticAlgorithm, Optimizer, RandomSearch
+from ai.hill_climbing import HillClimber
 from ai.genome import Genome
 
 # On the budget (0.8 + 0.2 + 0.5 = 1.5) and away from the [0, 1] edges.
@@ -33,6 +34,7 @@ OptimizerFactory = Callable[[np.random.Generator], Optimizer]
 OPTIMIZERS: Dict[str, OptimizerFactory] = {
     "GA": lambda rng: GeneticAlgorithm(rng),
     "Random": lambda rng: RandomSearch(rng),
+    "HC": lambda rng: HillClimber(rng),
 }
 
 
@@ -84,7 +86,7 @@ def compare(
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="GA vs RandomSearch on the toy target-genome problem")
+    parser = argparse.ArgumentParser(description="GA vs RandomSearch vs HillClimber on the toy target-genome problem")
     parser.add_argument("--seeds", type=int, default=10)
     parser.add_argument("--generations", type=int, default=50)
     args = parser.parse_args(argv)
@@ -98,9 +100,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"{gen + 1:>12}{row}")
     evals = next(iter(results.values()))[0].evaluations
     print(f"evaluations per run: {evals}")
-    ga, rs = results["GA"], results["Random"]
-    wins = sum(g.best_so_far[-1] > r.best_so_far[-1] for g, r in zip(ga, rs))
-    print(f"GA better than Random on {wins}/{args.seeds} seeds")
+    rs = results["Random"]
+    for name in ("GA", "HC"):
+        wins = sum(o.best_so_far[-1] > r.best_so_far[-1] for o, r in zip(results[name], rs))
+        print(f"{name} better than Random on {wins}/{args.seeds} seeds")
 
 
 if __name__ == "__main__":
